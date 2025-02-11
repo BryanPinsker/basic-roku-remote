@@ -23,8 +23,8 @@ class RokuRemoteApp:
         self.master.bind("<Down>",  lambda e: self.send_keypress("Down"))
         self.master.bind("<Left>",  lambda e: self.send_keypress("Left"))
         self.master.bind("<Right>", lambda e: self.send_keypress("Right"))
-        # Space bar to toggle Play/Pause
-        self.master.bind("<space>", lambda e: self.send_keypress("Play"))
+        # Space bar to toggle select
+        self.master.bind("<space>", lambda e: self.send_keypress("Select"))
 
     def create_widgets(self):
         top_frame = tk.Frame(self.master)
