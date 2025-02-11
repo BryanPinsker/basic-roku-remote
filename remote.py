@@ -4,18 +4,27 @@ import requests
 import socket
 import re
 import time
+
 #Settings > System > Advanced system settings > Control by mobile apps -> Enable is required to be enabled on the Roku device
 # This is a simple Roku remote control app using the External Control Protocol (ECP).
 class RokuRemoteApp:
     def __init__(self, master):
         self.master = master
-        self.master.title("Roku Remote (Using ECP)")
+        self.master.title("Roku Remote")
 
         self.discovered_rokus = []
         self.selected_roku_ip = tk.StringVar(value="")
         self.installed_channels = {}
 
         self.create_widgets()
+
+        # ---- KEY BINDINGS FOR ARROW KEYS & SPACE BAR ----
+        self.master.bind("<Up>",    lambda e: self.send_keypress("Up"))
+        self.master.bind("<Down>",  lambda e: self.send_keypress("Down"))
+        self.master.bind("<Left>",  lambda e: self.send_keypress("Left"))
+        self.master.bind("<Right>", lambda e: self.send_keypress("Right"))
+        # Space bar to toggle Play/Pause
+        self.master.bind("<space>", lambda e: self.send_keypress("Play"))
 
     def create_widgets(self):
         top_frame = tk.Frame(self.master)
@@ -25,12 +34,16 @@ class RokuRemoteApp:
         scan_button.pack(side=tk.LEFT, padx=5)
 
         self.roku_combo = ttk.Combobox(
-            top_frame, textvariable=self.selected_roku_ip, 
-            width=30, state="readonly"
+            top_frame,
+            textvariable=self.selected_roku_ip,
+            width=30,
+            state="readonly"
         )
+        self.roku_combo.configure(takefocus=False)
         self.roku_combo.set("No Rokus discovered")
         self.roku_combo.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
+        # Bind the selection event to unfocus the combobox
         self.roku_combo.bind("<<ComboboxSelected>>", self.on_roku_selected)
 
         remote_frame = tk.LabelFrame(self.master, text="Remote Control")
@@ -49,14 +62,12 @@ class RokuRemoteApp:
 
         tk.Button(dpad_frame, text="Up", width=8,
                   command=lambda: self.send_keypress("Up")).grid(row=0, column=1, pady=5)
-
         tk.Button(dpad_frame, text="Left", width=8,
                   command=lambda: self.send_keypress("Left")).grid(row=1, column=0, padx=5)
         tk.Button(dpad_frame, text="OK", width=8,
                   command=lambda: self.send_keypress("Select")).grid(row=1, column=1, padx=5)
         tk.Button(dpad_frame, text="Right", width=8,
                   command=lambda: self.send_keypress("Right")).grid(row=1, column=2, padx=5)
-
         tk.Button(dpad_frame, text="Down", width=8,
                   command=lambda: self.send_keypress("Down")).grid(row=2, column=1, pady=5)
 
@@ -97,18 +108,25 @@ class RokuRemoteApp:
         adv_btns_frame.pack(pady=5)
 
         tk.Button(adv_btns_frame, text="Get Device Info", command=self.get_device_info).pack(side=tk.LEFT, padx=5)
-        tk.Button(adv_btns_frame, text="Refresh Channels", command=self.get_installed_channels).pack(side=tk.LEFT, padx=5)
+        tk.Button(adv_btns_frame, text="Refresh Apps", command=self.get_installed_channels).pack(side=tk.LEFT, padx=5)
 
         channel_launch_frame = tk.Frame(adv_frame)
         channel_launch_frame.pack(pady=5, fill=tk.X)
 
         self.channel_list_var = tk.StringVar()
-        self.channel_combo = ttk.Combobox(channel_launch_frame, textvariable=self.channel_list_var,
-                                          width=30, state="readonly")
-        self.channel_combo.set("No channels loaded")
+        self.channel_combo = ttk.Combobox(
+            channel_launch_frame,
+            textvariable=self.channel_list_var,
+            width=30,
+            state="readonly"
+        )
+        self.channel_combo.set("No Apps loaded")
         self.channel_combo.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
 
-        launch_button = tk.Button(channel_launch_frame, text="Launch Channel", command=self.launch_selected_channel)
+        # Bind the selection event to unfocus the combobox
+        self.channel_combo.bind("<<ComboboxSelected>>", self.on_channel_selected)
+
+        launch_button = tk.Button(channel_launch_frame, text="Launch App", command=self.launch_selected_channel)
         launch_button.pack(side=tk.LEFT, padx=5)
 
         self.log_text = tk.Text(self.master, height=6, width=60)
@@ -122,7 +140,11 @@ class RokuRemoteApp:
             self.selected_roku_ip.set(ip)
             self.log(f"Selected Roku IP: {ip}")
         else:
-            self.log("No valid IP selected.")
+            self.log("No valid IP selected.")        
+        self.master.focus_set()
+
+    def on_channel_selected(self, event):
+        self.master.focus_set()
 
     def send_keypress(self, keypress):
         ip = self.selected_roku_ip.get().strip()
@@ -174,16 +196,16 @@ class RokuRemoteApp:
                         f"{name} ({app_id})" for app_id, name in self.installed_channels.items()
                     ]
                     self.channel_combo['values'] = combo_values
-                    self.channel_combo.set("Select a channel to launch")
-                    self.log(f"Loaded {len(self.installed_channels)} channels.")
+                    self.channel_combo.set("Select an app to launch")
+                    self.log(f"Loaded {len(self.installed_channels)} apps.")
                 else:
                     self.channel_combo['values'] = []
-                    self.channel_combo.set("No channels found")
-                    self.log("No channels found on device.")
+                    self.channel_combo.set("No apps found")
+                    self.log("No apps found on device.")
             else:
-                self.log(f"Error: HTTP {r.status_code} retrieving channels.")
+                self.log(f"Error: HTTP {r.status_code} retrieving apps.")
         except requests.exceptions.RequestException as e:
-            self.log(f"Error retrieving channels: {e}")
+            self.log(f"Error retrieving apps: {e}")
 
     def parse_roku_apps_xml(self, xml_text):
         pattern = re.compile(r'<app id="(\d+)"[^>]*>([^<]+)</app>')
@@ -254,8 +276,7 @@ class RokuRemoteApp:
             sock.sendto(message.encode("utf-8"), group)
             start_time = time.time()
             while True:
-                elapsed = time.time() - start_time
-                if elapsed > timeout:
+                if time.time() - start_time > timeout:
                     break
                 try:
                     data, _ = sock.recvfrom(65507)
@@ -301,10 +322,12 @@ class RokuRemoteApp:
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
 
+
 def main():
     root = tk.Tk()
     app = RokuRemoteApp(root)
     root.mainloop()
+
 
 if __name__ == "__main__":
     main()
