@@ -23,7 +23,6 @@ class RokuRemoteApp:
         self.master.bind("<Down>",  lambda e: self.send_keypress("Down"))
         self.master.bind("<Left>",  lambda e: self.send_keypress("Left"))
         self.master.bind("<Right>", lambda e: self.send_keypress("Right"))
-        # Space bar to toggle select
         self.master.bind("<space>", lambda e: self.send_keypress("Select"))
 
     def create_widgets(self):
@@ -42,8 +41,7 @@ class RokuRemoteApp:
         self.roku_combo.configure(takefocus=False)
         self.roku_combo.set("No Rokus discovered")
         self.roku_combo.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
-        # Bind the selection event to unfocus the combobox
+
         self.roku_combo.bind("<<ComboboxSelected>>", self.on_roku_selected)
 
         remote_frame = tk.LabelFrame(self.master, text="Remote Control")
@@ -101,14 +99,14 @@ class RokuRemoteApp:
         tk.Button(volume_frame, text="Mute", width=8,
                   command=lambda: self.send_keypress("VolumeMute")).pack(side=tk.LEFT, padx=5)
 
-        adv_frame = tk.LabelFrame(self.master, text="Advanced ECP Features")
+        adv_frame = tk.LabelFrame(self.master, text="Additional Options")
         adv_frame.pack(pady=10, fill=tk.X)
 
         adv_btns_frame = tk.Frame(adv_frame)
         adv_btns_frame.pack(pady=5)
 
         tk.Button(adv_btns_frame, text="Get Device Info", command=self.get_device_info).pack(side=tk.LEFT, padx=5)
-        tk.Button(adv_btns_frame, text="Refresh Apps", command=self.get_installed_channels).pack(side=tk.LEFT, padx=5)
+        tk.Button(adv_btns_frame, text="Refresh Apps", command=self.refresh_apps).pack(side=tk.LEFT, padx=5)
 
         channel_launch_frame = tk.Frame(adv_frame)
         channel_launch_frame.pack(pady=5, fill=tk.X)
@@ -132,6 +130,7 @@ class RokuRemoteApp:
         self.log_text = tk.Text(self.master, height=6, width=60)
         self.log_text.pack(pady=5)
 
+    # ------------------- Roku Selection and Active App -------------------
     def on_roku_selected(self, event):
         combo_str = self.roku_combo.get()
         ip_match = re.search(r"(\d+\.\d+\.\d+\.\d+)", combo_str)
@@ -139,9 +138,54 @@ class RokuRemoteApp:
             ip = ip_match.group(1)
             self.selected_roku_ip.set(ip)
             self.log(f"Selected Roku IP: {ip}")
+            self.refresh_apps()
+            self.set_active_app_in_combo()
         else:
-            self.log("No valid IP selected.")        
+            self.log("No valid IP selected.")
         self.master.focus_set()
+
+    def set_active_app_in_combo(self):
+        ip = self.selected_roku_ip.get().strip()
+        if not ip or ip.startswith("No Rokus"):
+            return
+
+        try:
+            url = f"http://{ip}:8060/query/active-app"
+            r = requests.get(url, timeout=2)
+            if r.status_code == 200:
+                self.log("Active-app response:\n" + r.text)
+
+                # More flexible pattern to capture <app> with or without an id:
+                match = re.search(r"<app([^>]*)>([^<]+)</app>", r.text)
+                if match:
+                    attr_str = match.group(1)  # e.g. ' id="12" something="..."'
+                    app_name = match.group(2)
+                    # Attempt to find an id="...":
+                    id_match = re.search(r'id="([^"]+)"', attr_str)
+                    if id_match:
+                        active_app_id = id_match.group(1)
+                    else:
+                        active_app_id = None
+
+                    if active_app_id:
+                        self.log(f"Active app parsed: {app_name} ({active_app_id})")
+                    else:
+                        self.log(f"Active app parsed (no id): {app_name}")
+
+                    if active_app_id and active_app_id in self.installed_channels:
+                        combo_str = f"{self.installed_channels[active_app_id]} ({active_app_id})"
+                        self.channel_combo.set(combo_str)
+                    else:
+                        if active_app_id:
+                            self.channel_combo.set(f"{app_name} ({active_app_id})")
+                        else:
+                            self.channel_combo.set(app_name)
+                else:
+                    self.log("Could not parse active-app response.")
+            else:
+                self.log(f"Active app request error: HTTP {r.status_code}")
+        except requests.RequestException as e:
+            self.log(f"Error retrieving active app: {e}")
 
     def on_channel_selected(self, event):
         self.master.focus_set()
@@ -178,6 +222,10 @@ class RokuRemoteApp:
         except requests.exceptions.RequestException as e:
             self.log(f"Error retrieving device info: {e}")
 
+    def refresh_apps(self):
+        self.get_installed_channels()
+        self.set_active_app_in_combo()
+
     def get_installed_channels(self):
         ip = self.selected_roku_ip.get().strip()
         if not ip or ip.startswith("No Rokus"):
@@ -208,7 +256,7 @@ class RokuRemoteApp:
             self.log(f"Error retrieving apps: {e}")
 
     def parse_roku_apps_xml(self, xml_text):
-        pattern = re.compile(r'<app id="(\d+)"[^>]*>([^<]+)</app>')
+        pattern = re.compile(r'<app id="([^"]+)"[^>]*>([^<]+)</app>')
         apps = {}
         for match in pattern.finditer(xml_text):
             app_id = match.group(1)
@@ -223,7 +271,7 @@ class RokuRemoteApp:
             return
 
         combo_str = self.channel_combo.get()
-        match = re.search(r"\((\d+)\)$", combo_str)
+        match = re.search(r"\(([^)]+)\)$", combo_str)
         if not match:
             self.log("Please select a valid channel.")
             return
@@ -234,6 +282,8 @@ class RokuRemoteApp:
             r = requests.post(url, timeout=3)
             if r.status_code == 200:
                 self.log(f"Launched channel: {combo_str}")
+                time.sleep(1)  # Small delay so Roku can switch
+                self.set_active_app_in_combo()
             else:
                 self.log(f"Error launching channel (HTTP {r.status_code})")
         except requests.exceptions.RequestException as e:
@@ -256,6 +306,8 @@ class RokuRemoteApp:
         first_ip = self.discovered_rokus[0][1]
         self.selected_roku_ip.set(first_ip)
         self.log(f"Discovered {len(self.discovered_rokus)} Roku(s). Selected: {first_ip}")
+
+        self.refresh_apps()
 
     def ssdp_discover_roku(self, timeout=3):
         group = ("239.255.255.250", 1900)
