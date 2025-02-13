@@ -4,6 +4,7 @@ import requests
 import socket
 import re
 import time
+from html import unescape
 
 #Settings > System > Advanced system settings > Control by mobile apps -> Enable is required to be enabled on the Roku device
 # This is a simple Roku remote control app using the External Control Protocol (ECP).
@@ -260,7 +261,7 @@ class RokuRemoteApp:
         apps = {}
         for match in pattern.finditer(xml_text):
             app_id = match.group(1)
-            app_name = match.group(2)
+            app_name = unescape(match.group(2))  
             apps[app_id] = app_name
         return apps
 
